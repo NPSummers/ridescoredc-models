@@ -19,6 +19,10 @@ pipeline does not require a database, a server, or a password from anyone.
     uv run ridescore run        # download the public source data, then calculate
     uv run ridescore inspect    # report what the run produced
 
+To include the optional BNA stress model, install its extra before building:
+
+    uv sync --extra bna
+
 `docs/running-the-pipeline.md` explains each command, the files each command writes, and why
 the run date is supplied as an argument rather than read from the clock.
 
@@ -159,4 +163,3 @@ $$ LANGUAGE plpgsql STABLE STRICT PARALLEL SAFE;
 
 - [ridescoredc](https://github.com/civictechdc/ridescoredc) — parent repo and project overview
 - [ridescoredc-website](https://github.com/civictechdc/ridescoredc-website) — serves the interactive map and survey tool from the data and PostGIS database this pipeline produces; see that repo for frontend and API setup instructions.
-

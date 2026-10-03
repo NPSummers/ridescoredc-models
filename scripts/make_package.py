@@ -30,6 +30,7 @@ NAME = "ridescoredc-data-preview"
 # "ridescoredc-data-preview@0.1" -- unmistakably disposable.
 
 DATASETS = ("road_segment", "crashes", "ridescore_v1_scores")
+OPTIONAL_DATASETS = ("bna_stress_scores",)
 
 
 def main() -> int:
@@ -40,6 +41,10 @@ def main() -> int:
     p.add_argument("--licence", default="CC-BY-4.0")
     args = p.parse_args()
 
+    datasets = list(DATASETS)
+    datasets.extend(
+        d for d in OPTIONAL_DATASETS if (args.out / f"{d}.parquet").exists()
+    )
     missing = [d for d in DATASETS if not (args.out / f"{d}.parquet").exists()]
     if missing:
         raise SystemExit(
@@ -59,36 +64,35 @@ def main() -> int:
         shutil.rmtree(target)
     target.mkdir(parents=True)
 
-    for dataset in DATASETS:
+    for dataset in datasets:
         shutil.copy2(args.out / f"{dataset}.parquet", target / f"{dataset}.parquet")
     shutil.copy2(args.out / "run.json", target / "run.json")
+    if (args.out / "metadata.json").exists():
+        shutil.copy2(args.out / "metadata.json", target / "metadata.json")
 
     # Resembles the Data Package standard rather than conforming to it; whether
     # to conform is Proposal 0001 §8's open question. Per-column descriptions
     # are Proposal 0002's and are deliberately absent.
-    (target / "datapackage.json").write_text(
-        json.dumps(
-            {
-                "name": NAME,
-                "version": args.version,
-                "created": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
-                "licenses": [{"name": args.licence}],
-                "run_date": run.get("run_date"),
-                "code": run.get("code"),
-                "resources": [
-                    {"name": d, "path": f"{d}.parquet", "format": "geoparquet"}
-                    for d in DATASETS
-                ],
-                "notes": (
-                    "Preview package built on the Open Data DC roadway network. "
-                    "Segment identity does not survive the move to OpenStreetMap, "
-                    "so anything keyed to it here is disposable."
-                ),
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    package = {
+        "name": NAME,
+        "version": args.version,
+        "created": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "licenses": [{"name": args.licence}],
+        "run_date": run.get("run_date"),
+        "code": run.get("code"),
+        "resources": [
+            {"name": d, "path": f"{d}.parquet", "format": "geoparquet"}
+            for d in datasets
+        ],
+        "notes": (
+            "Preview package built on the Open Data DC roadway network. "
+            "Segment identity does not survive the move to OpenStreetMap, "
+            "so anything keyed to it here is disposable."
+        ),
+    }
+    if (target / "metadata.json").exists():
+        package["metadata"] = "metadata.json"
+    (target / "datapackage.json").write_text(json.dumps(package, indent=2) + "\n")
 
     print(f"{target}")
     for f in sorted(target.iterdir()):

@@ -1,6 +1,6 @@
 # Running the pipeline
 
-Public DC data in, three datasets out. No database, no server, no credentials.
+Public DC data in, core datasets plus optional model outputs out. No database, no server, no credentials.
 
 ```
 uv sync
@@ -46,9 +46,11 @@ Reads the newest snapshot on or before `--run-date` and writes:
 | `road_segment.parquet` | the network build | geometry and street attributes |
 | `crashes.parquet` | the crash source | the reduced crash records |
 | `ridescore_v1_scores.parquet` | the model | the component scores and the blend |
+| `bna_stress_scores.parquet` | the optional BNA model | two-level segment stress |
+| `metadata.json` | the build | dataset and column descriptions |
 | `run.json` | the run | what it used, and what it worked out for itself |
 
-Three files rather than one wide frame: a street's width is a fact about the
+Separate files rather than one wide frame: a street's width is a fact about the
 street, its RideScore is a claim one model makes about it, and a second model
 scoring the same streets should not have to touch the first one's file.
 
@@ -148,6 +150,5 @@ contains. That needs a decision from a person before this output is deployed.
 ## What this does not do
 
 It writes files. It does not load a database, generate SQL, or know anything
-about how a street is drawn. It also does not yet describe its own columns for
-someone who has never seen this repository — the files carry names and types,
-not meanings.
+about how a street is drawn. `metadata.json` carries generated dataset and
+column descriptions for consumers that have not seen this repository.
