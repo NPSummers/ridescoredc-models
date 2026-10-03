@@ -17,13 +17,15 @@ quietly change which block survives.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 
-from ridescore import config
+from ridescore import config, metadata
+from ridescore.models.bna_stress.score import score as bna_stress
 from ridescore.models.ridescore_v1 import scores as ridescore_v1
 from ridescore.models.ridescore_v1 import weights as ridescore_v1_weights
 from ridescore.network import crash_join, geometry, normalise
@@ -56,6 +58,7 @@ FILENAMES = {
     "road_segment": "road_segment.parquet",
     "crashes": "crashes.parquet",
     "ridescore_v1_scores": "ridescore_v1_scores.parquet",
+    "bna_stress_scores": "bna_stress_scores.parquet",
 }
 
 
@@ -70,14 +73,18 @@ class Built:
     road_segment: gpd.GeoDataFrame
     crashes: gpd.GeoDataFrame
     ridescore_v1_scores: pd.DataFrame
+    bna_stress_scores: pd.DataFrame | None
     derived: dict
 
     def counts(self) -> dict[str, int]:
-        return {
+        counts = {
             "road_segment": len(self.road_segment),
             "crashes": len(self.crashes),
             "ridescore_v1_scores": len(self.ridescore_v1_scores),
         }
+        if self.bna_stress_scores is not None:
+            counts["bna_stress_scores"] = len(self.bna_stress_scores)
+        return counts
 
 
 def build(snapshot: Snapshot, run_date: dt.date) -> Built:
@@ -91,20 +98,30 @@ def build(snapshot: Snapshot, run_date: dt.date) -> Built:
     weights = ridescore_v1_weights.load()
     p95_crashes = ridescore_v1.p95(segments["crash_count_5yr"])
     scored = ridescore_v1.score(segments, weights, p95_crashes=p95_crashes)
+    try:
+        bna_scores = bna_stress(segments)
+    except ModuleNotFoundError as error:
+        if error.name != "bikescore_bna":
+            raise
+        bna_scores = None
 
     # Geometry is reduced last, and takes the scores with it: a segment dropped
     # here is dropped from every dataset, so no score refers to a street that
     # no longer exists.
     rendered = geometry.prepare_for_render(segments)
     scored = scored.loc[rendered.index]
+    if bna_scores is not None:
+        bna_scores = bna_scores.loc[rendered.index]
 
-    rendered, scored = _sort_and_key(rendered, scored)
+    rendered, scored, bna_scores = _sort_and_key(rendered, scored, bna_scores)
 
     return Built(
         road_segment=_road_segment(rendered),
         crashes=published_crashes.reset_index(drop=True),
         ridescore_v1_scores=scored,
+        bna_stress_scores=bna_scores,
         derived={
+            "run_date": run_date.isoformat(),
             "p95_crash_count": p95_crashes,
             "weights": weights.as_dict(),
             "crash_window": [d.isoformat() for d in crashes.window(run_date)],
@@ -113,8 +130,10 @@ def build(snapshot: Snapshot, run_date: dt.date) -> Built:
 
 
 def _sort_and_key(
-    segments: gpd.GeoDataFrame, scored: pd.DataFrame
-) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+    segments: gpd.GeoDataFrame,
+    scored: pd.DataFrame,
+    bna_scores: pd.DataFrame | None,
+) -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame | None]:
     """Sort once, at the end, and number the rows.
 
     `tile_id` is the row number after this sort, assigned here rather than by
@@ -132,10 +151,14 @@ def _sort_and_key(
     order = segments["segment_id"].sort_values(kind="stable").index
     segments = segments.loc[order].reset_index(drop=True)
     scored = scored.loc[order].reset_index(drop=True)
+    if bna_scores is not None:
+        bna_scores = bna_scores.loc[order].reset_index(drop=True)
 
     segments["tile_id"] = range(len(segments))
     scored.insert(0, "segment_id", segments["segment_id"])
-    return segments, scored
+    if bna_scores is not None:
+        bna_scores.insert(0, "segment_id", segments["segment_id"])
+    return segments, scored, bna_scores
 
 
 def _road_segment(segments: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -169,13 +192,23 @@ def write(built: Built, out: Path) -> dict[str, Path]:
     built.ridescore_v1_scores.to_parquet(out / FILENAMES["ridescore_v1_scores"], index=False)
     written["ridescore_v1_scores"] = out / FILENAMES["ridescore_v1_scores"]
 
+    if built.bna_stress_scores is not None:
+        built.bna_stress_scores.to_parquet(out / FILENAMES["bna_stress_scores"], index=False)
+        written["bna_stress_scores"] = out / FILENAMES["bna_stress_scores"]
+
+    metadata_body = metadata.describe(built)
+    metadata.validate(metadata_body, built.counts())
+    metadata_path = out / metadata.METADATA_FILENAME
+    metadata_path.write_text(json.dumps(metadata_body, indent=2, sort_keys=True) + "\n")
+    written["metadata"] = metadata_path
+
     return written
 
 
 def read(out: Path, dataset: str) -> pd.DataFrame:
     """Read one dataset back, for `inspect` and for comparing two runs."""
     path = out / FILENAMES[dataset]
-    if dataset == "ridescore_v1_scores":
+    if dataset in {"ridescore_v1_scores", "bna_stress_scores"}:
         return pd.read_parquet(path)
     return gpd.read_parquet(path)
 

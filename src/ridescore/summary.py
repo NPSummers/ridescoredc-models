@@ -50,12 +50,17 @@ def summarise(out: Path) -> Summary:
         flagged = int(test(segments).sum())
         imputed[name] = (flagged, 100.0 * flagged / max(len(segments), 1))
 
+    counts = {
+        "road_segment": len(segments),
+        "crashes": len(crashes),
+        "ridescore_v1_scores": len(scores),
+    }
+    bna_path = out / build.FILENAMES["bna_stress_scores"]
+    if bna_path.exists():
+        counts["bna_stress_scores"] = len(build.read(out, "bna_stress_scores"))
+
     return Summary(
-        counts={
-            "road_segment": len(segments),
-            "crashes": len(crashes),
-            "ridescore_v1_scores": len(scores),
-        },
+        counts=counts,
         length_km=float(segments["len"].sum()) / 1000.0,
         spread=spread.round(1),
         imputed=imputed,

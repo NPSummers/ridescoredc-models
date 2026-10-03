@@ -13,11 +13,13 @@ implementation, so the two can disagree.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-from ridescore import build
+from ridescore import build, metadata
 
 EXPECTED = "tests/fixtures/expected_extract.csv"
 
@@ -43,11 +45,12 @@ def built(extract, run_date):
 
 class TestShape:
     def test_produces_all_three_datasets(self, built):
-        assert built.counts() == {
-            "road_segment": 34,
-            "crashes": 49,
-            "ridescore_v1_scores": 34,
-        }
+        counts = built.counts()
+        assert counts["road_segment"] == 34
+        assert counts["crashes"] == 49
+        assert counts["ridescore_v1_scores"] == 34
+        if built.bna_stress_scores is not None:
+            assert counts["bna_stress_scores"] == 34
 
     def test_every_score_belongs_to_a_segment(self, built):
         assert set(built.ridescore_v1_scores["segment_id"]) == set(
@@ -134,20 +137,31 @@ class TestDeterminism:
         second = build.build(extract, run_date)
         assert_frame_equal(first.road_segment, second.road_segment)
         assert_frame_equal(first.ridescore_v1_scores, second.ridescore_v1_scores)
+        if first.bna_stress_scores is not None:
+            assert_frame_equal(first.bna_stress_scores, second.bna_stress_scores)
         assert first.derived == second.derived
 
 
 class TestWrittenFiles:
     def test_written_and_read_back_unchanged(self, built, tmp_path):
         build.write(built, tmp_path)
-        for dataset in build.FILENAMES:
+        for dataset in built.counts():
             back = build.read(tmp_path, dataset)
             assert len(back) == built.counts()[dataset]
 
     def test_two_writes_are_byte_identical(self, built, tmp_path):
         """What lets a deployment decide by content rather than by a version bump."""
         first, second = tmp_path / "a", tmp_path / "b"
-        build.write(built, first)
+        written = build.write(built, first)
         build.write(built, second)
-        for name in build.FILENAMES.values():
+        for path in written.values():
+            name = path.name
             assert (first / name).read_bytes() == (second / name).read_bytes()
+
+    def test_metadata_describes_every_written_dataset(self, built, tmp_path):
+        build.write(built, tmp_path)
+        document = json.loads((tmp_path / metadata.METADATA_FILENAME).read_text())
+
+        metadata.validate(document, built.counts())
+        assert document["run_date"] == "2026-08-05"
+        assert document["datasets"]["road_segment"]["row_count"] == 34

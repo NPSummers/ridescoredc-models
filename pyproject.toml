@@ -21,6 +21,7 @@ ridescore = "ridescore.cli:app"
 
 [project.optional-dependencies]
 db = ["psycopg[binary]>=3.2", "yoyo-migrations>=9.0"]
+bna = ["bikescore-bna @ git+https://github.com/bright-fakl/bikescore-bna"]
 # Only the notebook draws anything; the pipeline itself needs no plotting.
 notebook = ["matplotlib>=3.8", "jupyterlab>=4.0"]
 
@@ -44,6 +45,9 @@ notebooks = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ridescore"]

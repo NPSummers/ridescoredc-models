@@ -111,7 +111,11 @@ def build(
 
     typer.secho(f"Wrote {out}", fg=typer.colors.GREEN)
     for dataset, path in written.items():
-        typer.echo(f"  {path.name:<28} {built.counts()[dataset]:>8,} rows")
+        count = built.counts().get(dataset)
+        if count is None:
+            typer.echo(f"  {path.name}")
+        else:
+            typer.echo(f"  {path.name:<28} {count:>8,} rows")
     typer.echo(f"  {run_record.FILENAME}")
 
 
